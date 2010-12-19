@@ -1,0 +1,77 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'pp'
+require 'bdb'
+require 'digest/sha1'
+require 'kml'
+
+require 'lib/location_finder'
+
+READING_INTERVAL = 15
+READING_TIMESPAN = 100
+STRUCT_FMT = 'qq'
+STRUCT_SZ  = 16
+
+username = `defaults read com.apple.Mail MailAccounts | grep "AccountName = .*@me.com" | sed -e 's/.* //' -e 's/[";]//g'`.strip
+password = `security find-generic-password -ga #{username} 2>&1 | grep password | sed -e 's/.*://' -e 's/"//g'`.strip
+
+data = LocationFinder::FindMyIphone.find(username, password)
+
+data.each do |device|
+  fn = Digest::SHA1.hexdigest(device['id'])
+
+  File.open(fn + '.idx', 'a') do |index|
+    File.open(fn + '.db', 'a') do |db|
+      # write data to db file
+      db.seek(0, IO::SEEK_END)
+      offset = db.tell
+      db << Marshal.dump(device)
+      size = db.tell - offset
+      #puts "#{fn}.db wrote #{size} bytes at #{offset}"
+
+      # tell index where the data is
+      record = [offset, size].pack(STRUCT_FMT)
+      offset = index.tell
+      index.seek(0, IO::SEEK_END)
+      index << record
+      size = index.tell - offset
+      #puts "#{fn}.idx wrote #{size} bytes at #{offset}"
+    end
+  end
+end
+
+kml = KMLFile.new
+folder = KML::Folder.new(:name => 'Locations')
+
+Dir['*.idx'].each do |device_index|
+  device_db = device_index.sub('.idx', '.db')
+  File.open(device_index, 'r') do |index|
+    File.open(device_db, 'r') do |db|
+      while record = index.read(STRUCT_SZ)
+        #puts "#{device_index}: read #{STRUCT_SZ} bytes, now at #{index.tell}"
+        offset, size = record.unpack(STRUCT_FMT)
+        db.seek(offset, IO::SEEK_SET)
+        data = Marshal.load(db.read(size))
+
+        lat = data['location']['latitude']
+        long = data['location']['longitude']
+        time = Time.at(data['location']['timeStamp'].to_f / 1000)
+        name = data['name']
+
+        puts "#{name}: #{lat},#{long} @ #{time}"
+
+      folder.features << KML::Placemark.new(
+        :name => 'hi', 
+        :geometry => KML::Point.new(:coordinates => {:lat => lat, :lng => long})
+      )
+      end
+    end
+  end
+end
+
+kml.objects << folder
+
+File.open("#{Time.now.to_i}.kml", 'w') do |kml_file|
+  kml_file << kml.render
+end
