@@ -1,8 +1,6 @@
 #!/usr/bin/env ruby
 
 require 'rubygems'
-require 'pp'
-require 'bdb'
 require 'base64'
 require 'json'
 require 'fileutils'
