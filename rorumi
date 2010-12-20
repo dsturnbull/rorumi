@@ -3,75 +3,88 @@
 require 'rubygems'
 require 'pp'
 require 'bdb'
-require 'digest/sha1'
-require 'kml'
-
-require 'lib/location_finder'
+require 'base64'
+require 'json'
 
 READING_INTERVAL = 15
 READING_TIMESPAN = 100
-STRUCT_FMT = 'qq'
-STRUCT_SZ  = 16
+STRUCT_FMT = 'ddddd'
+# TODO: why the shit can't I do this in ruby?
+STRUCT_SZ  = `python -c 'import struct; print struct.calcsize("#{STRUCT_FMT}")'`.strip.to_i
+DEV_DIR = 'devices'
 
-username = `defaults read com.apple.Mail MailAccounts | grep "AccountName = .*@me.com" | sed -e 's/.* //' -e 's/[";]//g'`.strip
-password = `security find-generic-password -ga #{username} 2>&1 | grep password | sed -e 's/.*://' -e 's/"//g'`.strip
+def store_location
+  require 'lib/location_finder'
+  username = `defaults read com.apple.Mail MailAccounts | grep "AccountName = .*@me.com" | sed -e 's/.* //' -e 's/[";]//g'`.strip
+  password = `security find-generic-password -ga #{username} 2>&1 | grep password | sed -e 's/.*://' -e 's/"//g'`.strip
 
-data = LocationFinder::FindMyIphone.find(username, password)
+  LocationFinder::FindMyIphone.find(username, password).each do |device|
+    fn = File.join(DEV_DIR, Base64.encode64(device['name']).strip)
 
-data.each do |device|
-  fn = Digest::SHA1.hexdigest(device['id'])
+    File.open(fn + '.idx', 'a') do |index|
+      File.open(fn + '.db', 'a') do |db|
+        # write data to db file
+        db.seek(0, IO::SEEK_END)
+        offset = db.tell
+        db << Marshal.dump(device)
+        size = db.tell - offset
+        #puts "#{fn}.db wrote #{size} bytes at #{offset}"
 
-  File.open(fn + '.idx', 'a') do |index|
-    File.open(fn + '.db', 'a') do |db|
-      # write data to db file
-      db.seek(0, IO::SEEK_END)
-      offset = db.tell
-      db << Marshal.dump(device)
-      size = db.tell - offset
-      #puts "#{fn}.db wrote #{size} bytes at #{offset}"
+        # create the struct record
+        lat = device['location']['latitude']
+        long = device['location']['longitude']
+        time = device['location']['timeStamp'].to_f / 1000
+        record = [offset, size, lat, long, time].pack(STRUCT_FMT)
 
-      # tell index where the data is
-      record = [offset, size].pack(STRUCT_FMT)
-      offset = index.tell
-      index.seek(0, IO::SEEK_END)
-      index << record
-      size = index.tell - offset
-      #puts "#{fn}.idx wrote #{size} bytes at #{offset}"
-    end
-  end
-end
-
-kml = KMLFile.new
-folder = KML::Folder.new(:name => 'Locations')
-
-Dir['*.idx'].each do |device_index|
-  device_db = device_index.sub('.idx', '.db')
-  File.open(device_index, 'r') do |index|
-    File.open(device_db, 'r') do |db|
-      while record = index.read(STRUCT_SZ)
-        #puts "#{device_index}: read #{STRUCT_SZ} bytes, now at #{index.tell}"
-        offset, size = record.unpack(STRUCT_FMT)
-        db.seek(offset, IO::SEEK_SET)
-        data = Marshal.load(db.read(size))
-
-        lat = data['location']['latitude']
-        long = data['location']['longitude']
-        time = Time.at(data['location']['timeStamp'].to_f / 1000)
-        name = data['name']
-
-        puts "#{name}: #{lat},#{long} @ #{time}"
-
-      folder.features << KML::Placemark.new(
-        :name => 'hi', 
-        :geometry => KML::Point.new(:coordinates => {:lat => lat, :lng => long})
-      )
+        # tell index where the data is
+        offset = index.tell
+        index.seek(0, IO::SEEK_END)
+        index << record
+        size = index.tell - offset
+        #puts "#{fn}.idx wrote #{size} bytes at #{offset}"
       end
     end
   end
 end
 
-kml.objects << folder
+def read_data
+  data = {}
 
-File.open("#{Time.now.to_i}.kml", 'w') do |kml_file|
-  kml_file << kml.render
+  Dir[File.join(DEV_DIR, '*.idx')].each do |device_index|
+    name = Base64.decode64(device_index.sub(DEV_DIR + '/', '').sub('.idx', ''))
+    device_db = device_index.sub('.idx', '.db')
+
+    File.open(device_index, 'r') do |index|
+      File.open(device_db, 'r') do |db|
+        # read each record
+        while record = index.read(STRUCT_SZ)
+          #puts "#{device_index}: read #{STRUCT_SZ} bytes, now at #{index.tell}"
+          offset, size, lat, long, time = record.unpack(STRUCT_FMT)
+
+          # in case we want the serialised json
+          #db.seek(offset, IO::SEEK_SET)
+          #data = Marshal.load(db.read(size))
+
+          #puts "#{name}: #{lat},#{long} @ #{Time.at(time)}"
+          data[name] ||= []
+          data[name] << { :lat => lat, :long => long, :time => Time.at(time) }
+        end
+      end
+    end
+  end
+
+  puts JSON.pretty_generate(data)
+end
+
+if ARGV.length == 0
+  store_location
+  read_data
+end
+
+if ARGV.include?('-c')
+  store_location
+end
+
+if ARGV.include?('-r')
+  read_data
 end
