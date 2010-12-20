@@ -23,8 +23,10 @@ def store_location
   require File.join(File.dirname(real_loc), 'lib/location_finder')
   username = `defaults read com.apple.Mail MailAccounts | grep ".*@me.com" | sed -e 's/.* //' -e 's/[";]//g' | head -n 1`.strip
   password = `security find-generic-password -ga #{username} 2>&1 | grep password | sed -e 's/.*://' -e 's/"//g'`.strip
+  data = {}
 
   LocationFinder::FindMyIphone.find(username, password).each do |device|
+    name = device['name']
     fn = File.join(DEV_DIR, Base64.encode64(device['name']).strip)
 
     File.open(fn + '.idx', 'a') do |index|
@@ -34,7 +36,6 @@ def store_location
         offset = db.tell
         db << Marshal.dump(device)
         size = db.tell - offset
-        #puts "#{fn}.db wrote #{size} bytes at #{offset}"
 
         # create the struct record
         lat = device['location']['latitude']
@@ -47,10 +48,14 @@ def store_location
         index.seek(0, IO::SEEK_END)
         index << record
         size = index.tell - offset
-        #puts "#{fn}.idx wrote #{size} bytes at #{offset}"
+
+        data[name] ||= []
+        data[name] << { :lat => lat, :long => long, :time => Time.at(time) }
       end
     end
   end
+
+  data
 end
 
 def read_data
@@ -71,7 +76,6 @@ def read_data
           #db.seek(offset, IO::SEEK_SET)
           #data = Marshal.load(db.read(size))
 
-          #puts "#{name}: #{lat},#{long} @ #{Time.at(time)}"
           data[name] ||= []
           data[name] << { :lat => lat, :long => long, :time => Time.at(time) }
         end
@@ -83,8 +87,7 @@ def read_data
 end
 
 if ARGV.length == 0
-  store_location
-  read_data
+  puts JSON.pretty_generate(store_location)
 end
 
 if ARGV.include?('-c')
