@@ -1,2 +1,2 @@
-devices/*.idx
-devices/*.db
+*.dSYM
+rorumi

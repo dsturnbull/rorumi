@@ -25,3 +25,4 @@ module LocationFinder
     end
   end
 end
+
