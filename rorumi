@@ -13,6 +13,8 @@ STRUCT_FMT = 'ddddd'
 STRUCT_SZ  = `python -c 'import struct; print struct.calcsize("#{STRUCT_FMT}")'`.strip.to_i
 DEV_DIR = 'devices'
 
+Dir.chdir(File.dirname(__FILE__))
+
 def store_location
   require 'lib/location_finder'
   username = `defaults read com.apple.Mail MailAccounts | grep ".*@me.com" | sed -e 's/.* //' -e 's/[";]//g' | head -n 1`.strip
