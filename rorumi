@@ -15,7 +15,7 @@ DEV_DIR = 'devices'
 
 def store_location
   require 'lib/location_finder'
-  username = `defaults read com.apple.Mail MailAccounts | grep "AccountName = .*@me.com" | sed -e 's/.* //' -e 's/[";]//g'`.strip
+  username = `defaults read com.apple.Mail MailAccounts | grep ".*@me.com" | sed -e 's/.* //' -e 's/[";]//g' | head -n 1`.strip
   password = `security find-generic-password -ga #{username} 2>&1 | grep password | sed -e 's/.*://' -e 's/"//g'`.strip
 
   LocationFinder::FindMyIphone.find(username, password).each do |device|
