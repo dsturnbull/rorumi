@@ -5,18 +5,22 @@ require 'pp'
 require 'bdb'
 require 'base64'
 require 'json'
+require 'fileutils'
+require 'pathname'
 
 READING_INTERVAL = 15
 READING_TIMESPAN = 100
 STRUCT_FMT = 'ddddd'
 # TODO: why the shit can't I do this in ruby?
 STRUCT_SZ  = `python -c 'import struct; print struct.calcsize("#{STRUCT_FMT}")'`.strip.to_i
-DEV_DIR = 'devices'
+DEV_DIR = File.join(ENV['HOME'], '.rorumi')
 
-Dir.chdir(File.dirname(__FILE__))
+FileUtils.mkdir(DEV_DIR) rescue nil
+raise unless File.exist?(DEV_DIR)
 
 def store_location
-  require 'lib/location_finder'
+  real_loc = Pathname.new(__FILE__).realpath
+  require File.join(File.dirname(real_loc), 'lib/location_finder')
   username = `defaults read com.apple.Mail MailAccounts | grep ".*@me.com" | sed -e 's/.* //' -e 's/[";]//g' | head -n 1`.strip
   password = `security find-generic-password -ga #{username} 2>&1 | grep password | sed -e 's/.*://' -e 's/"//g'`.strip
 
